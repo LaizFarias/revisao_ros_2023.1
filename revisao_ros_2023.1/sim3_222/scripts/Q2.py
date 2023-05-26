@@ -15,8 +15,7 @@ import cv2.aruco as aruco
 
 class Control():
     def __init__(self):
-        self.rate = rospy.Rate(250) # 250 Hz
-
+        self.rate = rospy.Rate(250)
         self.color_param = {
             "pista_inicial": {
                 "lower": np.array([19, 80, 184],dtype=np.uint8),
@@ -62,9 +61,9 @@ class Control():
             "para": self.para,
             "aproxima_pista": self.aproxima_pista,
             "anda" : self.anda,
+            "go_to_coord" : self.go_to_coord,
             "aproxima_aruco" : self.aproxima_aruco,
             "aproxima_caixa" : self.aproxima_caixa,
-            "go_to_coord" : self.go_to_coord,
             
         }
 
@@ -87,7 +86,7 @@ class Control():
         self.roll, self.pitch, self.yaw = euler_from_quaternion(orientation_list)
 
         self.yaw = self.yaw % (2*np.pi)
-
+	
     def laser_callback(self, msg: LaserScan) -> None:
         self.laser_msg = np.array(msg.ranges).round(decimals=2)
         self.laser_msg[self.laser_msg == 0] = np.inf
@@ -96,9 +95,10 @@ class Control():
         self.laser_forward = np.min(list(self.laser_msg[0:5]) + list(self.laser_msg[354:359]))
         self.laser_backwards = np.min(list(self.laser_msg[175:185]))
 
+	
     def color_segmentation(self, hsv: np.ndarray, lower_hsv: np.ndarray, upper_hsv: np.ndarray,) -> Point:
         """ 
-        Use HSV mod space to segment the image and find the center of the object.
+        Use HSV color space to segment the image and find the center of the object.
 
         Args:
             bgr (np.ndarray): image in BGR format
@@ -108,7 +108,7 @@ class Control():
         """
         point = []
         mask = cv2.inRange(hsv, lower_hsv, upper_hsv)
-   
+
 
         contornos, arvore = cv2.findContours(mask.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
@@ -135,7 +135,7 @@ class Control():
             point = [point_x,point_y]
 
         return point, maior_contorno_area 
-
+    
     def geraAruco(self,img):
         centros = []
         distancia_aruco=[]
@@ -164,59 +164,70 @@ class Control():
                     centros.append(np.mean(corner, axis=0))
 
         return ids, centros, distancia_aruco
-        
+    
     def image_callback(self, msg: CompressedImage) -> None:
         """
         Callback function for the image topic
         """
-        """
-        Callback function for the image topic
-        """
-
-        #todos os comando que tem a haver com a cor é feito no imagine_callback
         try:
             cv_image = self.bridge.compressed_imgmsg_to_cv2(msg, "bgr8")
             hsv = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
             img = cv_image.copy()
         except CvBridgeError as e:
             print(e)
+        
         _, self.resultados = detect(net, img, CONFIDENCE, COLORS, CLASSES)
 
         h, w, d = img.shape
-        self.centro_segue = (h, 25*h//40)
-        self.centro_img = (w//2, h//2)
+        self.centro_segue = (h, 25*h//40) # corte que eu fiz só para que ele olhe para a pista
+        self.centro_img = (w//2, h//2) # foi o corte que fiz pra ele olhar o centro da imagem integralmente 
 
         self.pista, area_p = self.color_segmentation(hsv, self.color_param["pista_inicial"]["lower"], self.color_param["pista_inicial"]["upper"])
         self.pista_r, area_p = self.color_segmentation(hsv, self.color_param["pista_vermelha"]["lower"], self.color_param["pista_vermelha"]["upper"])
         self.pista_g, area_p = self.color_segmentation(hsv, self.color_param["pista_verde"]["lower"], self.color_param["pista_verde"]["upper"])
+        
         self.ids, self.centros, self.distancia_aruco = self.geraAruco(cv_image)
 
         self.bixos = {1:"dog",2:"horse"}
         self.centro = {1:self.pista_r,2:self.pista_g}
         self.pista_s = {1:"pista_vermelha",2:"pista_verde"}
 
+        #Atividade 2: que irá ser seguir o centro da pista inicial 
+
         if self.state == 2:
             if self.pista[0] != 0:
+                #o que o robo está enxergando é isso
                 self.selected_mod = "pista_inicial"
                 self.robot_state = "checar"
+        
+        #Atividade 3: vai ser chegar perto do aruco 41 para enxerga melhor a caixa de mobilenet 
         elif self.state == 3:
+            # irá ver se a lista de ids não igual a none, e se nao for é pq tem um aruco na imagem
             if self.ids is not None:
+                # se o aruco 41 estiver na lista de ids, ele irá pegar o indice dele e irá setar o estado do robo para aproxima_aruco
                 if [41] in self.ids:
                     self.idx = list(self.ids).index([41])
                     self.selected_mod = "aruco"
                     self.robot_state = "aproxima_aruco"
+
+        #procura a caixa de mobilenet
         elif self.state == 4: 
+            #verifica se tem alguma caixa na frente dele
             if len(self.resultados)!=0:
+                #verifica se tem algum sorteado na frente dele
                 if self.resultados[0][0] == self.bixos[self.n1]:
+                    #ele diz quem é que está na visao do robo 
                     self.selected_mod = self.bixos[self.n1]
                     self.robot_state = "checar"
-        elif self.state == 5:
 
-            if self.centro[self.n1][0] != 0:
+        #Atividade 5:  procura pista de volta 
+        elif self.state == 5:
+            if self.centro[self.n1][0] !=0:
                 self.selected_mod = self.pista_s[self.n1]
                 self.robot_state = "checar"
 
 
+        # quiser mostrar algo da um um imgshow
         cv2.imshow("Referencia",cv_image)
         cv2.waitKey(1)
 
@@ -267,11 +278,9 @@ class Control():
         if self.state == 2:
             if self.pista[0] == 0:
                 self.robot_state = "para"
-        elif self.state == 5:
+        elif self.state == 5: 
             if self.centro[self.n1][0] == 0:
                 self.robot_state = "para"
-                      
-            
 
     def aproxima_caixa(self) -> None:
         self.center_on_coord()
@@ -281,13 +290,14 @@ class Control():
 
         else:
             self.robot_state = "para"  
-
+            
     def aproxima_aruco(self) -> None:
         self.center_on_coord()
-        if (self.distancia_aruco[self.idx])/100 > 1.2:
+        if (self.distancia_aruco[self.idx])/100 > 1.0:
             self.twist.linear.x = 0.2
         else:
             self.robot_state = "para"
+
 
     def para(self) -> None:
         self.twist = Twist()
@@ -295,7 +305,7 @@ class Control():
             self.state = 2
             self.robot_state = "rotate_esquerda"
         elif self.state == 2:
-            self.state = 3
+            self.state = 3 
             self.robot_state = "rotate_direita"
         elif self.state == 3:
             self.state = 4
@@ -312,6 +322,9 @@ class Control():
         elif self.state == 5:
             self.robot_state = "go_to_coord"
 
+
+
+
             
 
     def center_on_coord(self):
@@ -320,26 +333,23 @@ class Control():
 
         if self.selected_mod == "pista_inicial":
             err = self.centro_segue[0] - self.pista[0]
-
         elif self.selected_mod == "aruco":
             err = self.centro_img[0] - self.centros[self.idx][0]
-
         elif self.selected_mod == "dog":
-            err = self.centro_img[0] - self.resultados[0][2][0]
-
+            err = self.centro_img[0] - ((self.resultados[0][2][0] + self.resultados[0][3][0])/2)
         elif self.selected_mod == "horse":
-            err = self.centro_img[0] - self.resultados[0][2][0]
-
+            err = self.centro_img[0] - ((self.resultados[0][2][0] + self.resultados[0][3][0])/2)
         elif self.selected_mod == "pista_vermelha":
-            err = self.centro_segue[0] - self.pista_r[0]
+            err = self.centro_segue[0] - self.centro[self.n1][0]
         elif self.selected_mod == "pista_verde":
-            err = self.centro_segue[0] - self.pista_g[0]
-
+            err = self.centro_segue[0] - self.centro[self.n1][0]
 
         self.twist.angular.z = float(err)/self.kp # maior o kp (mais preciso é o robo) , quanto menor menos preciso
 
+    #código go_to_coord da aluna Beatriz Freitas
     def go_to_coord(self):
         self.twist = Twist()
+        anda = False
         difx = self.initial_position.x - self.position.x
         dify = self.initial_position.y - self.position.y
 
@@ -366,9 +376,6 @@ class Control():
         elif anda:
             self.twist.linear.x = 0.1
 
-
-
-
     def control(self):
         '''
         This function is called at least at {self.rate} Hz.
@@ -392,5 +399,3 @@ def main():
 
 if __name__=="__main__":
 	main()
-
-
