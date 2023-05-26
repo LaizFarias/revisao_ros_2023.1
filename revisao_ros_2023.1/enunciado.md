@@ -76,6 +76,10 @@ Casos intermediários ou omissos da rubrica serão decididos pelo professor.
 
 
 
+
+
+## Questão 2
+
 Seu robô está no cenário visível abaixo:
 
 
@@ -86,8 +90,6 @@ Que pode ser disparado com o comando:
 
     roslaunch my_simulation zig-zag.launch
 
-
-## Questão 2
 
 Sabe-se que se um robô seguir uma parede em um labirinto virando sempre para o mesmo lado  quando encontra um obstáculo (direita ou esquerda) eventualmente vai acabar saindo do labirinto. 
 
